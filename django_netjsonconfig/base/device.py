@@ -1,12 +1,13 @@
 from django.db import models
 from django.utils.translation import ugettext_lazy as _
+from ondelta.models import OnDeltaMixin
 
 from ..utils import get_random_key
 from ..validators import device_name_validator, key_validator, mac_address_validator
 from .base import BaseModel
 
 
-class AbstractDevice(BaseModel):
+class AbstractDevice(BaseModel, OnDeltaMixin):
     """
     Base device model
     Stores information related to the
@@ -54,14 +55,25 @@ class AbstractDevice(BaseModel):
 
     def clean(self):
         """
-        modifies related config status if name
-        attribute is changed (queries the database)
+        `CustomStateAdding` set in this function because
+        it is called before ondelta_name `_state.adding`
+        is always `false` in that function, most possibly
+        a bug:
+        https://github.com/adamhaney/django-ondelta/issues/13
+        Please change if this bug is fixed.
         """
-        super(AbstractDevice, self).clean()
         if self._state.adding:
-            return
-        current = self.__class__.objects.get(pk=self.pk)
-        if self.name != current.name and self._has_config():
+            self.CustomStateAdding = True
+        else:
+            self.CustomStateAdding = False
+        super(AbstractDevice, self).clean()
+
+    def ondelta_name(self, old_value, new_value):
+        """
+        Modifies related config status if name
+        attribute is changed.
+        """
+        if self._has_config() and not self.CustomStateAdding:
             self.config.set_status_modified()
 
     def _has_config(self):

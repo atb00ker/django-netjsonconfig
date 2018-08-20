@@ -3,6 +3,7 @@ from django.db import models
 from django.utils.translation import ugettext_lazy as _
 from model_utils import Choices
 from model_utils.fields import StatusField
+from ondelta.models import OnDeltaMixin
 from sortedm2m.fields import SortedManyToManyField
 
 from .. import settings as app_settings
@@ -10,12 +11,13 @@ from ..signals import config_modified
 from .base import BaseConfig
 
 
-class AbstractConfig(BaseConfig):
+class AbstractConfig(BaseConfig, OnDeltaMixin):
     """
     Abstract model implementing the
     NetJSON DeviceConfiguration object
     """
-    device = models.OneToOneField('django_netjsonconfig.Device', on_delete=models.CASCADE)
+    device = models.OneToOneField(
+        'django_netjsonconfig.Device', on_delete=models.CASCADE)
     STATUS = Choices('modified', 'applied', 'error')
     status = StatusField(_('configuration status'), help_text=_(
         '"modified" means the configuration is not applied yet; \n'
@@ -35,17 +37,36 @@ class AbstractConfig(BaseConfig):
 
     def clean(self):
         """
-        modifies status if key attributes of the configuration
-        have changed (queries the database)
+        `CustomStateAdding` set in this function because
+        it is called before ondelta_name `_state.adding`
+        is always `false` in that function, most possibly
+        a bug:
+        https://github.com/adamhaney/django-ondelta/issues/13
+        Please change if this bug is fixed.
         """
-        super(AbstractConfig, self).clean()
         if self._state.adding:
+            self.CustomStateAdding = True
+        else:
+            self.CustomStateAdding = False
+        super(AbstractConfig, self).clean()
+
+    def ondelta_backend(self, old_value, new_value):
+        """
+        Modifies status_modified if backend
+        attribute is changed.
+        """
+        if self.CustomStateAdding:
             return
-        current = self.__class__.objects.get(pk=self.pk)
-        for attr in ['backend', 'config']:
-            if getattr(self, attr) != getattr(current, attr):
-                self.set_status_modified(save=False)
-                break
+        self.set_status_modified(save=False)
+
+    def ondelta_config(self, old_value, new_value):
+        """
+        Modifies status_modified if config
+        attribute is changed.
+        """
+        if self.CustomStateAdding:
+            return
+        self.set_status_modified(save=False)
 
     def save(self, *args, **kwargs):
         result = super(AbstractConfig, self).save(*args, **kwargs)
@@ -133,6 +154,7 @@ class TemplatesThrough(object):
     """
     Improves string representation of m2m relationship objects
     """
+
     def __str__(self):
         return _('Relationship with {0}').format(self.template.name)
 
@@ -275,7 +297,8 @@ class TemplatesVpnMixin(models.Model):
             ca = vpn.ca
             cert = vpnclient.cert
             # CA
-            ca_filename = 'ca-{0}-{1}.pem'.format(ca.pk, ca.common_name.replace(' ', '_'))
+            ca_filename = 'ca-{0}-{1}.pem'.format(
+                ca.pk, ca.common_name.replace(' ', '_'))
             ca_path = '{0}/{1}'.format(app_settings.CERT_PATH, ca_filename)
             # update context
             c.update({
@@ -287,10 +310,12 @@ class TemplatesVpnMixin(models.Model):
             if cert:
                 # cert
                 cert_filename = 'client-{0}.pem'.format(vpn_id)
-                cert_path = '{0}/{1}'.format(app_settings.CERT_PATH, cert_filename)
+                cert_path = '{0}/{1}'.format(app_settings.CERT_PATH,
+                                             cert_filename)
                 # key
                 key_filename = 'key-{0}.pem'.format(vpn_id)
-                key_path = '{0}/{1}'.format(app_settings.CERT_PATH, key_filename)
+                key_path = '{0}/{1}'.format(app_settings.CERT_PATH,
+                                            key_filename)
                 # update context
                 c.update({
                     context_keys['cert_path']: cert_path,

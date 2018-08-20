@@ -156,7 +156,16 @@ class TestConfig(CreateConfigMixin, CreateTemplateMixin,
         c = Config()
         self.assertEqual(c.status, 'modified')
 
-    def test_status_modified_after_change(self):
+    def test_status_modified_after_change_backend(self):
+        c = self._create_config(backend='netjsonconfig.OpenWrt', status='applied')
+        self.assertEqual(c.status, 'applied')
+        c.refresh_from_db()
+        c.backend = 'netjsonconfig.OpenWisp'
+        c.full_clean()
+        c.save()
+        self.assertEqual(c.status, 'modified')
+
+    def test_status_modified_after_change_config(self):
         c = self._create_config(status='applied')
         self.assertEqual(c.status, 'applied')
         c.refresh_from_db()
